@@ -3,6 +3,7 @@ library(neonUtilities)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
+library(forcats)
 library(httr)
 
 setwd()
@@ -90,26 +91,52 @@ missing_data_scc<-sls_scc_joined%>%
   pivot_longer(everything())%>%
   filter(value>0,value!=nrow(sls_scc_joined))
 
+# summarise soil bgc data to remove quality flagged or NA values.
+# pivot the data to long, makes the summarise groupings more straightforward
+# then pivot back to wide so each row is one sample
 sls_chemsummary<-sls_soilChemistry%>%
   pivot_longer(c(nitrogenPercent,organicCPercent,CNratio),
                names_to="chem_variable",values_to="value")%>%
-  filter(!is.na(value),across(ends_with("QF"),~(.=="OK"|is.na(.))))%>%
-  group_by(sampleID,cnSampleID,acidTreatment,chem_variable)%>%
-  summarise(mean=mean(value), n=n(), .groups = "keep")%>%
-  
-  
+  filter(!is.na(value),across(ends_with("QF"), ~(.=="OK"|is.na(.))))%>%
+  group_by(sampleID, cnSampleID, acidTreatment, chem_variable)%>%
+  summarise(mean=mean(value), 
+            n=n(), .groups = "drop")%>%
+  pivot_wider(id_cols= c(sampleID,cnSampleID),
+              names_from = chem_variable,
+              values_from = mean)%>%
+  mutate(CNratio=ifelse(is.na(CNratio),
+                        round(organicCPercent/nitrogenPercent,1),
+                        CNratio))
+
+missing_data_chem<-sls_chemsummary%>%
+  summarise(across(everything(),~sum(is.na(.))))%>%
+  pivot_longer(everything())%>%
+  filter(value>0,value!=nrow(sls_scc_joined))
+
+# Join field collection to soil C and N data
+# and discretize the pH using NRCS classes.
+# https://www.nrcs.usda.gov/wps/portal/nrcs/detail/soils/ref/?cid=nrcs142p2_054253
+
+pH_breaks<-c(0,3.5,4.5,5.1,5.6,6.1,6.6,7.4,7.9,8.5,9.1,14)
+pH_labels<-c("Ultra acid","Extremely acid","Very strongly acid","Strongly acid","Moderately acid","Slightly acid","Neutral","Slightly alkaline","Moderately alkaline","Strongly alkaline","Very strongly alkaline")
+
 sls_chem_joined<-sls_scc_joined%>%
   inner_join(sls_bgcSubsampling,by=c("sampleID","domainID","siteID","plotID","namedLocation","horizon"))%>%
-  select(sampleID,domainID,siteID,plotID,collectDate=collectDate.field)%>%
-  inner_join(sls_chemsummary,by="sampleID", suffix=c(".phys",".chem"))
+  select(sampleID,cnSampleID,domainID,siteID,plotID,nlcdClass,horizon,collectDate=collectDate.field,sampleTiming,soilTemp,elevation,decimalLatitude,soilMoisture,soilInWaterpH,soilInCaClpH)%>%
+  mutate(reaction_class=cut(soilInWaterpH,breaks = pH_breaks,labels = pH_labels))%>%
+  inner_join(sls_chemsummary,by=c("sampleID","cnSampleID"), suffix=c(".phys",".chem"))
 
+# Plot N vs C with horizon and reaction class shape/color
+# facet on the NLCD class.
+# maybe this should focus on just selected classes to keep it less cluttered?
 ggplot(sls_chem_joined,
        aes(x=organicCPercent,
            y=nitrogenPercent,
-           color=horizon))+
-  facet_wrap(~siteID)+
-  geom_point()+
-  geom_vline(xintercept = 20,size=2,color="blue")+
+           shape=horizon,
+           color=reaction_class))+
+  facet_wrap(~nlcdClass,scales="fixed")+
+  geom_point(size=3)+
+  geom_vline(xintercept = 20,size=1.3,color="blue")
+
   scale_color_manual(values=c("O"="blue","M"="red"))+
   xlab("% Organic Carbon") + ylab("% Total Nitrogen")
-
