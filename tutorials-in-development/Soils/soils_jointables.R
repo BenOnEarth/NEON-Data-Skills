@@ -47,7 +47,7 @@ View(getProductInfo(dpID))
 sls_ISdata<-loadByProduct(dpID=dpID, site = site, startdate = startdate, enddate = enddate, avg="30", token=token, check.size=TRUE)
 
 zipsDir
-stackByTable(paste0(zipsDir,"/NEON_litterfall.zip"),savepath = zipsDir)
+stackByTable(paste0(zipsDir,""),savepath = zipsDir)
 
 tablefiles<-table_types%>%
   filter(productID==dpID)%>%
@@ -91,22 +91,16 @@ missing_data_scc<-sls_scc_joined%>%
   pivot_longer(everything())%>%
   filter(value>0,value!=nrow(sls_scc_joined))
 
-# summarise soil bgc data to remove quality flagged or NA values.
-# pivot the data to long, makes the summarise groupings more straightforward
-# then pivot back to wide so each row is one sample
+# summarise soil bgc data.
+# First replace quality flagged data with NAs without losing other data.
+# Average the lab replicates, then coalesce the acid treatment C rows so each row is one sample
 sls_chemsummary<-sls_soilChemistry%>%
-  pivot_longer(c(nitrogenPercent,organicCPercent,CNratio),
-               names_to="chem_variable",values_to="value")%>%
-  filter(!is.na(value),across(ends_with("QF"), ~(.=="OK"|is.na(.))))%>%
-  group_by(sampleID, cnSampleID, acidTreatment, chem_variable)%>%
-  summarise(mean=mean(value), 
-            n=n(), .groups = "drop")%>%
-  pivot_wider(id_cols= c(sampleID,cnSampleID),
-              names_from = chem_variable,
-              values_from = mean)%>%
-  mutate(CNratio=ifelse(is.na(CNratio),
-                        round(organicCPercent/nitrogenPercent,1),
-                        CNratio))
+  mutate(nitrogenPercent=ifelse(cnPercentQF=="sample percent N out of qaqc tolerance", NA, nitrogenPercent),
+         organicCPercent=ifelse(cnPercentQF=="sample percent C out of qaqc tolerance", NA, organicCPercent))%>%
+  filter(percentAccuracyQF=="OK"|is.na(percentAccuracyQF))%>%
+  group_by(cnSampleID)%>%
+  summarise(across(c(nitrogenPercent,organicCPercent,CNratio),list(n=~sum(!is.na(.)),mean=~mean(.,na.rm = TRUE))), .groups = "drop")%>%
+  mutate(CNratio_mean=ifelse(is.na(CNratio_mean),round(organicCPercent_mean/nitrogenPercent_mean, 1),CNratio_mean))
 
 missing_data_chem<-sls_chemsummary%>%
   summarise(across(everything(),~sum(is.na(.))))%>%
@@ -117,8 +111,9 @@ missing_data_chem<-sls_chemsummary%>%
 # and discretize the pH using NRCS classes.
 # https://www.nrcs.usda.gov/wps/portal/nrcs/detail/soils/ref/?cid=nrcs142p2_054253
 
-pH_breaks<-c(0,3.5,4.5,5.1,5.6,6.1,6.6,7.4,7.9,8.5,9.1,14)
+pH_breaks<-c(1.8,3.5,4.5,5.1,5.6,6.1,6.6,7.4,7.9,8.5,9.1,11)
 pH_labels<-c("Ultra acid","Extremely acid","Very strongly acid","Strongly acid","Moderately acid","Slightly acid","Neutral","Slightly alkaline","Moderately alkaline","Strongly alkaline","Very strongly alkaline")
+
 
 sls_chem_joined<-sls_scc_joined%>%
   inner_join(sls_bgcSubsampling,by=c("sampleID","domainID","siteID","plotID","namedLocation","horizon"))%>%
