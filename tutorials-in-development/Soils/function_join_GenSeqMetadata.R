@@ -1,5 +1,5 @@
 #### FUNCTION downloadSequenceMetadataRev ####
-downloadSequenceMetadataRev <- function(sites='all', startYrMo, endYrMo, 
+downloadSequenceData <- function(sites='all', startYrMo, endYrMo, 
                                         targetGene= "", dpID = "DP1.10108.001",
                                         dir = "", rawDownload = FALSE) {
   # authors: Lee Stanish, Ben Shetterly
@@ -63,7 +63,7 @@ downloadSequenceMetadataRev <- function(sites='all', startYrMo, endYrMo,
   ext <- md[[grep("DnaExtraction$",names(md))]]
   
   # character vector of join columns used for metadata on all Microbe marker gene sequence DPs
-  join_common <- c("domainID","siteID","namedLocation","collectDate","dnaSampleID","internalLabID")
+  join_common <- c("domainID","siteID","namedLocation","collectDate","dnaSampleID")
   # filter soil extraction table to remove non-relevant rows (suggested per DP user guide). 
   # Include plotID column for joining soils extraction sequencing data
   if(dpID=="DP1.10108.001"){
@@ -87,14 +87,12 @@ downloadSequenceMetadataRev <- function(sites='all', startYrMo, endYrMo,
   
   # download local copy if user provided output dir path
   if(dir != "") {
-    if(!dir.exists(dir)) {
-      dir.create(dir)
-    }
+    if(!dir.exists(dir)) dir.create(dir)
     # give informative name to metadata file and display to user
     md_filename<-paste0("mmg_metadata_", substr(dpID,5,9),"_", targetGene, "_", format(Sys.Date(),"%Y%m%d"), ".csv")
     write.csv(out, file = paste0(dir, "/", md_filename), row.names=FALSE)
     print(paste0("metadata downloaded to: ", dir, "/", md_filename))
-    # prepare and download raw sequence data files
+    # prepare and download raw sequence data files, if use provided rawDownload = TRUE
     if(rawDownload){
       # Some raw data files are not available (404 response) even using
       # the URLs given in _RawDataFiles table. Initialize a table with all the unique URLs/filenames, 
@@ -114,15 +112,14 @@ downloadSequenceMetadataRev <- function(sites='all', startYrMo, endYrMo,
         print("NOTE: The following raw sequence files are not available for download:")
         print(rawfile_status[!rawfile_status$rawdata_available,]$rawDataFileName)
       }
-      # for zipsByURI, variables file must be 
-      # in the same directory as uri data and named "variables.csv"
-      if(!file.exists(paste0(dir,"/variables.csv"))){
+      # for zipsByURI, variables file is required; it must be 
+      # in the same directory as uri data file and named "variables.csv"
         write.csv(vartable, file = paste0(dir, "/variables.csv"), row.names=FALSE)
-      }
       # get raw data table name, since this depends on data product
-      # and zipsByURI needs it to match the variables table.
+      # and zipsByURI needs filename to match the variables table.
       raw_tablename<-vartable%>%
-        filter(tolower(dataType) == "uri", grepl("RawDataFiles$", table))%>%.[[1,"table"]]
+        filter(tolower(dataType) == "uri", grepl("RawDataFiles$", table))%>%
+        select(table)%>%.[[1]]
       # use filter to remove records with unavailable raw data files
       # then prepare it for zipsByURI by writing to a file
       write.csv(filter(rawfile_status, rawdata_available), file = paste0(dir, "/", raw_tablename,".csv"), row.names = FALSE)
