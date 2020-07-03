@@ -1,17 +1,63 @@
-#### FUNCTION downloadSequenceMetadataRev ####
-downloadSequenceData <- function(sites='all', startYrMo, endYrMo, 
+#### FUNCTION downloadSoilsFieldData ####
+downloadSoilsFieldData <- function(sites='all', startYrMo, endYrMo, dir = "") {
+  # author: Ben Shetterly
+  # date: 2020-07-02
+  # loads and joins tables of soil data, retaining IDs which can be used for joins to other products.
+  # output: a data frame of joined tables of soil field collection metadata and physical properties 
+  # (locations, depths, horizons, moisture, pH)
+  # sites: character vector of valid site ID's, or 'all' for all sites associated with the DP
+  # startYrMo, endYrMo: inclusive starting and ending months, format YYYY-MM.
+  # dir (optional): If a local copy of the filtered metadata and raw sequences is desired, provide path to output dir
+  dpID <- "DP1.10086.001"
+  dpInfo<-neonUtilities::getProductInfo(dpID)
+  if("all" %in% tolower(sites)){
+    sites <- "all"
+  } else {
+    if(!all(sites %in% dpInfo$siteCodes$siteCode)){
+      print("Invalid site(s): must be NEON site code(s) associated with this data product, or 'all'")
+      return(NULL)
+    } else sites <- toupper(sites)
+  }
+  print("Downloading soil field collection and physical properties data")
+  slsL1<-neonUtilities::loadByProduct(dpID = dpID, site = sites, startdate = startYrMo, enddate = endYrMo, package = "expanded", check.size = FALSE)
+  # extract the variables table
+  vartable <- slsL1[[grep("^variables_",names(L1))]]
+  # assign column classes using neonUtilities readTableNEON and variables table, applied to selected tables
+  md<-sapply(slsL1[c("sls_soilCoreCollection", "sls_soilMoisture", "sls_soilpH")], neonUtilities::readTableNEON, varFile = vartable, simplify = FALSE)
+  list2env(md, envir = environment())
+  # a character vector of columns common to all data frames in the DP.
+  join_cols<-c("sampleID", "domainID", "siteID", "plotID", "namedLocation", "horizon", "collectDate")
+  slsj1 <- sls_soilCoreCollection%>%
+    left_join(sls_soilMoisture, by = join_cols, suffix=c(".field",".moisture"))
+  joined <- slsj1%>%
+    left_join(sls_soilpH, by = join_cols, suffix=c("",".pH"))
+  
+  # download local copy if user provided output dir path
+  if(dir != "") {
+    if(!dir.exists(dir)) dir.create(dir)
+    filename<-paste0("sls_fieldphysdata_", format(Sys.Date(),"%Y%m%d"), ".csv")
+    write.csv(joined, file = paste0(dir, "/", filename), row.names=FALSE)
+    print(paste0("Soil Physical properties data downloaded to: ", dir, "/", filename))
+  }
+  return(joined)
+}
+### END FUNCTION downloadSoilsFieldData ###
+
+#### FUNCTION downloadSequenceMetadata ####
+downloadSequenceMetadata <- function(sites='all', startYrMo, endYrMo, 
                                         targetGene= "", dpID = "DP1.10108.001",
                                         dir = "", rawDownload = FALSE) {
   # authors: Lee Stanish, Ben Shetterly
   # date: 2020-06-29
   # function loads marker gene sequencing metadata for target data product, gene, site(s) and date(s)
   # option to download output by providing a valid output directory
-  # option to download raw sequence archive files
-  # sites: character vector of valid site ID's, or 'all' for all sites
+  # option to download raw sequence archive files for the data queried
+  # output: a data frame of joined tables containing microbe gene sequences metadata
+  # sites: character vector of valid site ID's, or 'all' for all sites associated with the DP
   # targetGene: '16S' or 'ITS'
-  # startYrMo: start date, format YYYY-MM
-  # endYrMo: end date, format YYYY-MM
-  # dpID: NEON data product of interest. Default is soil marker gene sequences, but should work for surface water and benthic microbes
+  # startYrMo, endYrMo: inclusive starting and ending months, format YYYY-MM.
+  # dpID: NEON data product of interest. Default is soil marker gene sequences (DP1.10108.001), but
+  # also works for surface water (DP1.20282.001) and benthic (DP1.20280.001) microbe marker gene DPs.
   # dir (optional): If a local copy of the filtered metadata and raw sequences is desired, provide path to output dir
   # rawDownload: set to TRUE to download raw microbe marker sequence data. NOTE: THESE ARE VERY LARGE FILES
   library(neonUtilities)
@@ -49,7 +95,7 @@ downloadSequenceData <- function(sites='all', startYrMo, endYrMo,
   # use table_types to get the relevant table names corresponding to the DPID, 
   # which have similar but not identical names across DPs.
   tablenames <- neonUtilities::table_types%>%
-    filter(grepl(dpID,productID),
+    filter(productID == dpID,
            grepl(paste("DnaExtraction$|RawDataFiles$|GeneSequencing_",targetGene,"$",sep = ""),tableName))
   # extract the variables table
   vartable <- mmgL1[[grep("^variables_",names(mmgL1))]]
@@ -92,7 +138,7 @@ downloadSequenceData <- function(sites='all', startYrMo, endYrMo,
     md_filename<-paste0("mmg_metadata_", substr(dpID,5,9),"_", targetGene, "_", format(Sys.Date(),"%Y%m%d"), ".csv")
     write.csv(out, file = paste0(dir, "/", md_filename), row.names=FALSE)
     print(paste0("metadata downloaded to: ", dir, "/", md_filename))
-    # prepare and download raw sequence data files, if use provided rawDownload = TRUE
+    # check and download raw sequence data files, if user provided rawDownload = TRUE
     if(rawDownload){
       # Some raw data files are not available (404 response) even using
       # the URLs given in _RawDataFiles table. Initialize a table with all the unique URLs/filenames, 
@@ -126,8 +172,15 @@ downloadSequenceData <- function(sites='all', startYrMo, endYrMo,
       # download raw sequence data to the given dir/ECS_zipFiles
       zipsByURI(filepath = dir, check.size = TRUE, unzip = FALSE, saveZippedFiles = TRUE)
     }
-  } else if(rawDownload) print("No save directory provided. To download raw sequence data, specify a save path with 'dir = '") # Warns user if no dir provided but rawDownload = TRUE
+  } else if(rawDownload) {
+    print("No save directory provided. To download raw sequence data, specify a save path with 'dir = '") # Warns user if no dir provided but rawDownload = TRUE
+  }
   return(out)
   
   ### END FUNCTION ###
 }
+
+join_cols_common<-c("domainID","siteID","namedLocation","collectDate", "geneticSampleID")
+joined_soil_gen<-left_join(s,g,by=join_cols_common,suffix=c(".field",".genetic"))
+selectedvars_soil <- joined_soil_gen%>%
+  select(domainID,siteID,namedLocation,collectDate,decimalLatitude, decimalLongitude, elevation, horizon, sampleBottomDepth,sampleTopDepth,soilMoisture,soilInWaterpH,soilInCaClpH,rawDataFileName)

@@ -84,7 +84,7 @@ for(u in rawfile_status$uri){
 # also can ensure the DNA sample ID is distinct, but not sure why this is needed here
 mmg_raw16S<-mmg_soilRawDataFiles%>%
   filter(grepl("16S",rawDataFileName),
-         rawDataFilePath %in% (rawfile_status%>%filter(rawdata_available)%>%.$uri))
+         rawDataFilePath %in% rawfile_status[rawfile_status$rawdata_available,]$uri)
   # distinct(dnaSampleID,.keep_all = TRUE)
 
 # ITS rawDataFiles metadata - this contains URLs to sequence data
